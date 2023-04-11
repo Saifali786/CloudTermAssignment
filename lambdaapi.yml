@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS API Gateway with a Lambda Integration
+
+Parameters:
+  CorsOrigin:
+    Type: String
+    Default: "'*'"
+  CorsHeaders:
+    Type: String
+    Default: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+  CorsMethods:
+    Type: String
+    Default: "'OPTIONS,POST'"
+
+Resources:
+  BusinessLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: FetchData
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const s3 = new AWS.S3();
+          const bucketName = 'termassignmentcloud';
+          const objectKey = 'userdata.txt';
+          exports.handler = async (event) => {
+            console.log(event);
+            const data = event.message;
+            console.log("Hellooooooo");
+            const params = {
+              Bucket: bucketName,
+              Key: objectKey,
+              Body: data
+            };
+            try {
+              const response = await s3.putObject(params).promise();
+              console.log('String data uploaded successfully:', response);
+              return {
+                statusCode: 200,
+                headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, PUT, DELETE',
+                },
+                body: JSON.stringify({ message: 'Data uploaded successfully' })
+              };
+            } catch (error) {
+              console.log('Error uploading string data to S3:', error);
+              return {
+                statusCode: 500,
+                headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, PUT, DELETE',
+                },
+                body: JSON.stringify({ message: 'Error uploading data' })
+              };
+            }
+          }
+      Handler: index.handler
+      Role: !Sub "arn:aws:iam::001452129080:role/LabRole"
+      Runtime: nodejs14.x
+      Timeout: 600
+
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: API
+      ApiKeySourceType: HEADER
+      Description: An API Gateway with a Lambda Integration
+      EndpointConfiguration:
+        Types:
+          - EDGE
+      Name: api-gw
+
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: "lambda"
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: "POST"
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${!stageVariables.lambdaAlias}/invocations"
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: $input.json('$')
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: !Ref CorsHeaders
+              method.response.header.Access-Control-Allow-Methods: !Ref CorsMethods
+              method.response.header.Access-Control-Allow-Origin: !Ref CorsOrigin
+        RequestTemplates:
+          application/json: $input.json('$')
+      MethodResponses:
+        - ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          StatusCode: "200"
+      OperationName: "lambda"
+      ResourceId: !Ref ApiGatewayResource
+      RestApiId: !Ref ApiGatewayRestApi
+
+  APIGatewayOptionsMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      ResourceId: !Ref ApiGatewayResource
+      RestApiId: !Ref ApiGatewayRestApi
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: !Ref CorsHeaders
+              method.response.header.Access-Control-Allow-Methods: !Ref CorsMethods
+              method.response.header.Access-Control-Allow-Origin: !Ref CorsOrigin
+            ResponseTemplates:
+              application/json: ""
+            StatusCode: "200"
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+          StatusCode: "200"
+
+  ApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref ApiGatewayDeployment
+      Description: API GW Stage dev
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: "dev"
+      Variables:
+        "lambdaAlias": "businessLambda"
+
+  GWLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref BusinessLambda
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/lambda"
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: APIGatewayOptionsMethod
+    Properties:
+      Description: Lambda API Deployment
+      RestApiId: !Ref ApiGatewayRestApi
+
+Outputs:
+  test:
+    Value: !Ref ApiGatewayRestApi

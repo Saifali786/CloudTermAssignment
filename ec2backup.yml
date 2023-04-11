@@ -1,0 +1,49 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Create an EC2 instance and deploy a React application"
+Resources:
+  MyKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: key-pair-ec2
+  MyInstance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      InstanceType: "t3.large"
+      ImageId: "ami-0557a15b87f6559cf"
+      KeyName: !Ref MyKeyPair
+      SecurityGroupIds:
+        - !Ref MySecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo apt update
+          sudo apt-get install nginx -y 
+          sudo apt-get install curl
+          curl -fsSL https://deb.nodesource.com/setup_14.x | sudo -E bash - 
+          sudo apt-get install -y nodejs
+          cd /var/www/html/
+          git clone https://github.com/Saifali786/CloudProject.git
+          sudo rm index.nginx-debian.html      
+          cd CloudProject
+          sudo npm install
+          sudo npm run build
+          sudo cp -r build /var/www/html
+          cd ../
+          sudo mv build/* .
+  MySecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Enable all traffic"
+      SecurityGroupIngress:
+        - IpProtocol: "-1"
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: "-1"
+          FromPort: 0
+          ToPort: 65535
+          CidrIpv6: "::/0"
+Outputs:
+  PublicIpAddress:
+    Value: !GetAtt MyInstance.PublicIp

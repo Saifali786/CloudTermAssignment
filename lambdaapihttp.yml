@@ -1,0 +1,203 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS API Gateway with a Lambda Integration
+Resources:
+  FetchingLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: FetchData
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const s3 = new AWS.S3();
+          const bucketName = 'termassignmentcloud';
+          const objectKey = 'userdata.txt';
+          exports.handler = async (event) => {
+          console.log(event);
+          console.log(event.body);
+          let data = JSON.parse(event.body);
+          data = data.message;
+            console.log("Hellooooooo");
+            const params = {
+              Bucket: bucketName,
+              Key: objectKey,
+              Body: data
+            };
+            try {
+              const response = await s3.putObject(params).promise();
+              console.log('String data uploaded successfully:', response);
+              return {
+                statusCode: 200,
+                headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, PUT, DELETE',
+                },
+                body: JSON.stringify({ message: 'Data uploaded successfully' })
+              };
+            } catch (error) {
+              console.log('Error uploading string data to S3:', error);
+              return {
+                statusCode: 500,
+                headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, PUT, DELETE',
+                },
+                body: JSON.stringify({ message: 'Error uploading data' })
+              };
+            }
+          }
+      Handler: index.handler
+      Role: !Sub "arn:aws:iam::001452129080:role/LabRole"
+      Runtime: nodejs14.x
+      Timeout: 600
+  SentimentLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: Sentiment
+      Code:
+        ZipFile: |
+          const AWS = require("aws-sdk");
+          const s3 = new AWS.S3();
+          const polly = new AWS.Polly();
+          const comprehend = new AWS.Comprehend();
+          const bucketName = 'termassignmentcloud';
+          const objectKey = "sentiment.txt";
+
+          exports.handler = async (event) => {
+          console.log(event);
+          const objectKeyUser = "userdata.txt";
+          const params = { Bucket: bucketName, Key: objectKeyUser };
+
+          try {
+            const { Body } = await s3.getObject(params).promise();
+            const text = Body.toString();
+            console.log(text);
+
+            const languageParams = { Text: text };
+            const { Languages: languages } = await comprehend.detectDominantLanguage(languageParams).promise();
+            const dominantLanguage = languages[0].LanguageCode;
+
+            const sentimentParams = { Text: text, LanguageCode: dominantLanguage };
+              const sentiment = await comprehend
+                .detectSentiment(sentimentParams)
+                .promise();
+              const payload = { message: sentiment.Sentiment };
+              console.log(payload);
+              
+            const speechParams = {
+              Text: sentiment.Sentiment,
+              OutputFormat: "mp3",
+              VoiceId: "Joanna",
+            };
+            const { AudioStream } = await polly.synthesizeSpeech(speechParams).promise();
+
+            const putParams = { Bucket: bucketName, Key: objectKey, Body: `${text} - Sentiment: ${sentiment.Sentiment}` };
+            await s3.putObject(putParams).promise();
+
+            return {
+              statusCode: 200,
+              body: JSON.stringify({ message: sentiment.Sentiment, audioStream: AudioStream.toString("base64"), }),
+              headers: {
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Headers': 'Content-Type',
+              'Access-Control-Allow-Methods': 'OPTIONS,POST'
+            }
+            };
+          }  
+
+          catch (err) {
+            console.log(err);
+            return {
+              statusCode: 500,
+              headers: {
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Headers': 'Content-Type',
+              'Access-Control-Allow-Methods': 'OPTIONS,POST'
+            }, 
+              body: JSON.stringify({
+                message: `Error: ${err.message}`,
+              }),
+            };
+          }
+          };
+
+      Handler: index.handler
+      Role: !Sub "arn:aws:iam::001452129080:role/LabRole"
+      Runtime: nodejs14.x
+      Timeout: 600
+
+  FetchingLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref FetchingLambda
+      Principal: "apigateway.amazonaws.com"
+
+  SentimentLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref SentimentLambda
+      Principal: "apigateway.amazonaws.com"
+
+  APIGateway:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: Fetch API
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowMethods:
+          - "*"
+        AllowOrigins:
+          - "*"
+        AllowHeaders:
+          - "*"
+
+  APIGatewayIntegrationWithFetchingLambda:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref APIGateway
+      Description: Lambda Integration
+      IntegrationType: AWS_PROXY
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+      IntegrationUri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FetchingLambda.Arn}/invocations"
+
+  APIGatewayIntegrationWithSentimentLambda:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref APIGateway
+      Description: Lambda Integration
+      IntegrationType: AWS_PROXY
+      IntegrationMethod: POST
+      PayloadFormatVersion: "2.0"
+      IntegrationUri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SentimentLambda.Arn}/invocations"
+
+  APIGatewayStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref APIGateway
+      StageName: deploy
+      Description: Deploy Stage
+      AutoDeploy: true
+
+  APIGatewayRouteTFetching:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref APIGateway
+      RouteKey: "POST /fetch-data"
+      AuthorizationType: NONE
+      Target: !Join
+        - /
+        - - integrations
+          - !Ref APIGatewayIntegrationWithFetchingLambda
+
+  APIGatewayRouteSentiment:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref APIGateway
+      RouteKey: "POST /sentiment"
+      AuthorizationType: NONE
+      Target: !Join
+        - /
+        - - integrations
+          - !Ref APIGatewayIntegrationWithSentimentLambda
