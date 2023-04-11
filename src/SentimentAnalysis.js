@@ -7,14 +7,14 @@ export const SentimentAnalysis = () => {
   const [input, setInput] = useState("");
   const [message, setMessage] = useState("");
   const [audioSrc, setAudioSrc] = useState("");
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     setMessage("");
     setAudioSrc("");
     console.log("button pressed");
     console.log(input);
-    handleText(input);
-    setTimeout(getText, 10000);
+    await handleText(input);
+    setTimeout(getText);
   };
 
   async function getText() {
