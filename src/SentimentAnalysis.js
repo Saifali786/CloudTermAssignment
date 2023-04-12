@@ -22,7 +22,7 @@ export const SentimentAnalysis = () => {
       objectKey: "userdata.txt",
     };
     const result = await fetch(
-      "https://7pld7m5wra.execute-api.us-east-1.amazonaws.com/deploy/sentiment",
+      "https://jgbhrdu9re.execute-api.us-east-1.amazonaws.com/deploy/sentiment",
       {
         method: "POST",
         headers: {
@@ -50,7 +50,7 @@ export const SentimentAnalysis = () => {
       message: data,
     };
     const response = await fetch(
-      "https://7pld7m5wra.execute-api.us-east-1.amazonaws.com/deploy/fetch-data",
+      "https://jgbhrdu9re.execute-api.us-east-1.amazonaws.com/deploy/fetch-data",
       {
         method: "POST",
         headers: {
